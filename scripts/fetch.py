@@ -86,10 +86,12 @@ class FX:
     snapshot if the live API is unreachable, so other fetchers can still
     convert local-currency prices."""
 
-    # Defensive fallback (May 2026 ballpark). Replaced with live values on
-    # successful Frankfurter call.
+    # Defensive fallback (May 2026 ballpark — derived from MRB Daily5
+    # cross-rate observed 2026-05-04: 866 sen/kg = 223.25 USc/kg implies
+    # MYR ≈ 3.88/USD, INR derived from RBI 25000/100kg = $262.50 implies
+    # INR ≈ 95.24/USD). Replaced with live values on Frankfurter success.
     FALLBACK = {
-        "MYR": 4.43, "INR": 84.20, "JPY": 152.50, "CNY": 7.18,
+        "MYR": 3.88, "INR": 95.24, "JPY": 152.50, "CNY": 7.18,
         "THB": 35.10, "IDR": 16250.0, "VND": 25400.0,
     }
 
@@ -234,23 +236,26 @@ def fetch_anrpc(fx: FX) -> Dict[str, Dict[str, float]]:
 # ---------------------------------------------------------------------------
 
 def fetch_mrb(fx: FX) -> Dict[str, Dict[str, float]]:
-    """MRB daily SMR20 + Latex-in-Bulk (60% DRC) noon prices.
-    Native unit on Daily5.aspx is sen/kg (1 sen = 0.01 MYR).
-    Table contains both the noon SMR20 closing sell and Latex60 closing.
+    """MRB daily SMR + Latex-in-Bulk noon prices.
+    Daily5.aspx publishes a table where each row is:
+        <Grade>  <Sen/Kg>  <US Cents/Kg>
+    e.g.    SMR 20   866.00   223.25
+    We use the second number (US Cents/Kg) which is the official MRB
+    USD conversion — bypasses any FX guessing on our side.
+    The header line contains the "noon on DD/MM/YYYY" date.
     """
     out: Dict[str, Dict[str, float]] = {}
     r = _http("http://www3.lgm.gov.my/smhargagetah/Daily5.aspx")
     if not r:
-        # try the legacy mre URL as backup
-        r = _http("http://www3.lgm.gov.my/mre/daily.aspx")
-        if not r:
-            return out
+        return out
     soup = BeautifulSoup(r.text, "lxml")
     text = soup.get_text(" ", strip=True)
 
-    # Date: page header usually contains a date like "02/05/2026" or "2 May 2026"
+    # Date: header has "ON DD/MM/YYYY"
     iso_date = _today_iso()
-    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
+    m = re.search(r"NOON\s*ON\s*(\d{1,2})/(\d{1,2})/(\d{4})", text, re.I)
+    if not m:
+        m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
     if m:
         try:
             iso_date = date(int(m.group(3)), int(m.group(2)),
@@ -258,27 +263,124 @@ def fetch_mrb(fx: FX) -> Dict[str, Dict[str, float]]:
         except ValueError:
             pass
 
-    usd_per_myr = fx.usd_per("MYR") or 0.225
+    # Pattern: grade name then TWO numbers (sen/kg, then US cents/kg).
+    # Grab the SECOND number — that's the published USD conversion.
+    def _grab(label_pattern: str, lo: float, hi: float) -> Optional[float]:
+        m = re.search(
+            label_pattern + r"\s+(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)",
+            text, re.I)
+        if not m:
+            return None
+        us_cents = _to_float(m.group(2))
+        if us_cents and lo < us_cents < hi:
+            return round(us_cents / 100.0, 4)
+        return None
 
-    # SMR20: row contains "SMR20" (or "SMR 20") followed by sen/kg figure.
-    m_smr = re.search(
-        r"SMR\s*20[^\d]{0,40}(\d{2,4}[\.,]\d{1,3})", text, re.I)
-    if m_smr:
-        sen = _to_float(m_smr.group(1))
-        if sen and 100 < sen < 2000:  # plausible sen/kg range
-            myr_per_kg = sen / 100.0
-            out.setdefault("SMR20_MYS", {})[iso_date] = round(
-                myr_per_kg * usd_per_myr, 4)
+    smr20 = _grab(r"SMR\s*20", 30.0, 600.0)   # plausible USc/kg range
+    if smr20:
+        out.setdefault("SMR20_MYS", {})[iso_date] = smr20
+    latex = _grab(r"Latex(?:\s+in\s+Bulk)?", 30.0, 600.0)
+    if latex:
+        out.setdefault("LATEX_60_MYS", {})[iso_date] = latex
 
-    # Latex 60% DRC: row labelled "Latex" or "Latex-in-Bulk"
-    m_lx = re.search(
-        r"Latex[^\d]{0,80}(\d{2,4}[\.,]\d{1,3})", text, re.I)
-    if m_lx:
-        sen = _to_float(m_lx.group(1))
-        if sen and 80 < sen < 1500:
-            myr_per_kg = sen / 100.0
-            out.setdefault("LATEX_60_MYS", {})[iso_date] = round(
-                myr_per_kg * usd_per_myr, 4)
+    return out
+
+
+def fetch_rubberboard_india_v2(fx: FX) -> Dict[str, Dict[str, float]]:
+    """Primary source for RSS4 Kottayam (INR/100kg), SMR20 KL (USD/100kg),
+    and Latex(60%) KL (USD/100kg). Rubber Board India publishes a clean
+    table with date headers and per-market sub-tables. This page is
+    multi-purpose — it gives us India domestic AND KL international
+    grades in one fetch, all pre-converted to USD where applicable.
+
+    Page URL: https://rubberboard.gov.in/public
+
+    Table structure (after stripping HTML):
+        Domestic Market** on DD-MM-YYYY per 100Kg
+        Kottayam Kochi Agartala
+        CategoryINR ₹USD $ RSS4 NNNNN.N NNN.NN RSS5 NNNNN.N NNN.NN     <- Kottayam
+        CategoryINR ₹USD $ RSS4 NNNNN.N NNN.NN RSS5 NNNNN.N NNN.NN     <- Kochi
+        CategoryINR ₹USD $ RSS4 * * RSS5 * *                           <- Agartala
+        International Market on DD-MM-YYYY per 100Kg
+        Bangkok KualaLumpur
+        CategoryINR ₹USD $ RSS1 # # RSS2 # # ...                       <- Bangkok
+        CategoryINR ₹USD $ SMR20 NNNNN.N NNN.NN LATEX(60%) NNNNN.N NNN.NN
+    Numeric markers: # = market holiday, * = not available, ~ = no transaction
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    r = _http("https://rubberboard.gov.in/public")
+    if not r:
+        r = _http("http://rubberboard.gov.in/public")
+    if not r:
+        return out
+    soup = BeautifulSoup(r.text, "lxml")
+    text = soup.get_text(" ", strip=True)
+
+    # ---- Domestic block (Kottayam/Kochi/Agartala) ----
+    dm = re.search(
+        r"Domestic\s+Market.*?on\s+(\d{1,2})[\-/](\d{1,2})[\-/](\d{4})"
+        r"\s+per\s+100Kg(.*?)International\s+Market",
+        text, re.I | re.S)
+    if dm:
+        try:
+            dom_date = date(int(dm.group(3)), int(dm.group(2)),
+                            int(dm.group(1))).isoformat()
+        except ValueError:
+            dom_date = _today_iso()
+        domestic = dm.group(4)
+        # First "RSS4 <inr> <usd>" after the Domestic header is Kottayam.
+        m = re.search(
+            r"RSS\s*[\-]?\s*4\s+([\d.,]+)\s+([\d.,]+)", domestic)
+        if m:
+            inr_per_100kg = _to_float(m.group(1))
+            if inr_per_100kg and 5000 < inr_per_100kg < 100000:
+                out.setdefault("RSS4_KOTTAYAM_INR", {})[dom_date] = round(
+                    inr_per_100kg, 0)
+
+    # ---- International block (Bangkok/Kuala Lumpur) ----
+    im = re.search(
+        r"International\s+Market.*?on\s+(\d{1,2})[\-/](\d{1,2})[\-/](\d{4})"
+        r"\s+per\s+100Kg(.*?)(?:Daily\s*/|$)",
+        text, re.I | re.S)
+    if im:
+        try:
+            int_date = date(int(im.group(3)), int(im.group(2)),
+                            int(im.group(1))).isoformat()
+        except ValueError:
+            int_date = _today_iso()
+        intl = im.group(4)
+
+        # KL SMR20 — pattern: "SMR20  <inr>  <usd>"  (skip if "#" or "*")
+        m = re.search(
+            r"SMR\s*20\s+([\d.,]+)\s+([\d.,]+)", intl)
+        if m:
+            usd_100kg = _to_float(m.group(2))
+            if usd_100kg and 30 < usd_100kg < 600:
+                out.setdefault("SMR20_MYS", {})[int_date] = round(
+                    usd_100kg / 100.0, 4)
+
+        # KL LATEX(60%)
+        m = re.search(
+            r"LATEX\s*\(\s*60\s*%?\s*\)\s+([\d.,]+)\s+([\d.,]+)", intl, re.I)
+        if m:
+            usd_100kg = _to_float(m.group(2))
+            if usd_100kg and 30 < usd_100kg < 600:
+                out.setdefault("LATEX_60_MYS", {})[int_date] = round(
+                    usd_100kg / 100.0, 4)
+
+        # Bangkok RSS3 — proxy for Thailand benchmark when not on holiday.
+        # Bangkok is the FIRST sub-table; capture only its RSS3 row.
+        bkk_match = re.search(
+            r"Bangkok.*?CategoryINR.*?(RSS\s*3\s+[\d.,]+\s+[\d.,]+)",
+            intl, re.I | re.S)
+        if bkk_match:
+            m = re.search(
+                r"RSS\s*3\s+([\d.,]+)\s+([\d.,]+)", bkk_match.group(1))
+            if m:
+                usd_100kg = _to_float(m.group(2))
+                if usd_100kg and 30 < usd_100kg < 600:
+                    out.setdefault("RSS3_SGP", {})[int_date] = round(
+                        usd_100kg / 100.0, 4)
 
     return out
 
@@ -461,10 +563,14 @@ def main() -> int:
     src_used: Dict[str, str] = {}     # series -> which source it came from
     src_errors: Dict[str, str] = {}
 
+    # Order matters: first source to deliver a series wins attribution.
+    # Rubber Board India is now PRIMARY because its single page provides
+    # RSS4 Kottayam (India), SMR20 KL + Latex 60% KL (Malaysia), all
+    # pre-converted to USD/100kg by the publisher.
     runners = [
-        ("ANRPC", lambda: fetch_anrpc(fx)),
+        ("RubberBoardIndia_v2", lambda: fetch_rubberboard_india_v2(fx)),
         ("MRB",   lambda: fetch_mrb(fx)),
-        ("RubberBoardIndia", fetch_rubberboard_india),
+        ("ANRPC", lambda: fetch_anrpc(fx)),
         ("SHFE",  lambda: fetch_shfe_ru(fx)),
         ("RTAS",  fetch_rtas_sgx),
     ]
