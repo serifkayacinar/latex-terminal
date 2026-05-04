@@ -1,0 +1,57 @@
+name: Update latex prices
+
+on:
+  schedule:
+    # Every 6 hours (UTC). Adjust freely.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:   # allow manual run from the Actions tab
+  push:
+    branches: [main]
+    paths: ['scripts/**', '.github/workflows/**']
+
+permissions:
+  contents: write   # required to commit refreshed data back
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Ensure seed data exists
+        run: |
+          if [ ! -f data/prices.json ]; then
+            echo "Seed data missing -- generating from scripts/seed.py"
+            python scripts/seed.py
+          fi
+
+      - name: Fetch latest prices
+        run: python scripts/fetch.py
+        continue-on-error: true   # never block the commit on a flaky source
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name  "latex-tracker-bot"
+          git config user.email "latex-tracker-bot@users.noreply.github.com"
+          git add data/prices.json data/last_run.json || true
+          if git diff --staged --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "data: refresh prices ($(date -u +'%Y-%m-%dT%H:%MZ'))"
+            git push
+          fi
