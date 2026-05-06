@@ -1,6 +1,6 @@
 {
-  "generated_utc": "2026-05-06T08:42:38+00:00",
-  "prices_generated_utc": "2026-05-06T08:42:38+00:00",
+  "generated_utc": "2026-05-06T15:06:24+00:00",
+  "prices_generated_utc": "2026-05-06T15:06:24+00:00",
   "fx_source": "fallback",
   "fx_rates_usd_base": {
     "MYR": 3.88,
@@ -27,7 +27,7 @@
     "SMR20_MYS": {
       "status": "LIVE",
       "source": "ANRPC daily price + MRB Daily5 fallback",
-      "via": "RubberBoardIndia_v2",
+      "via": "MRB",
       "last_real_print": "2026-05-06"
     },
     "STR20_THA": {
@@ -67,10 +67,10 @@
       "last_real_print": null
     },
     "LATEX_60_MYS": {
-      "status": "LIVE",
+      "status": "STALE",
       "source": "ANRPC daily + MRB Daily5 fallback",
-      "via": "RubberBoardIndia_v2",
-      "last_real_print": "2026-05-06"
+      "reason": "no live print this run; using prior value",
+      "last_real_print": null
     },
     "LATEX_60_THA": {
       "status": "STALE",
@@ -79,10 +79,10 @@
       "last_real_print": null
     },
     "RSS4_KOTTAYAM_INR": {
-      "status": "LIVE",
+      "status": "STALE",
       "source": "Rubber Board of India",
-      "via": "RubberBoardIndia_v2",
-      "last_real_print": "2026-05-05"
+      "reason": "no live print this run; using prior value",
+      "last_real_print": null
     }
   },
   "source_errors": {}
