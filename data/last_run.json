@@ -1,6 +1,6 @@
 {
-  "generated_utc": "2026-05-07T04:09:11+00:00",
-  "prices_generated_utc": "2026-05-07T04:09:11+00:00",
+  "generated_utc": "2026-05-07T09:08:15+00:00",
+  "prices_generated_utc": "2026-05-07T09:08:15+00:00",
   "fx_source": "fallback",
   "fx_rates_usd_base": {
     "MYR": 3.88,
@@ -28,7 +28,7 @@
       "status": "LIVE",
       "source": "ANRPC daily price + MRB Daily5 fallback",
       "via": "RubberBoardIndia_v2",
-      "last_real_print": "2026-05-06"
+      "last_real_print": "2026-05-07"
     },
     "STR20_THA": {
       "status": "STALE",
@@ -70,7 +70,7 @@
       "status": "LIVE",
       "source": "ANRPC daily + MRB Daily5 fallback",
       "via": "RubberBoardIndia_v2",
-      "last_real_print": "2026-05-06"
+      "last_real_print": "2026-05-07"
     },
     "LATEX_60_THA": {
       "status": "STALE",
