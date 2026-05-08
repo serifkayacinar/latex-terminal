@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-05-08T08:01:28+00:00",
+  "generated_utc": "2026-05-08T14:19:27+00:00",
   "start": "2021-01-01",
   "end": "2026-05-03",
   "currency_note": "All series in USD/kg unless suffix indicates otherwise. RSS4_KOTTAYAM_INR is INR per 100 kg.",
@@ -16733,7 +16733,8 @@
       "2026-05-04": 25100.0,
       "2026-05-05": 25100.0,
       "2026-05-06": 25200.0,
-      "2026-05-07": 25300.0
+      "2026-05-07": 25300.0,
+      "2026-05-08": 25500.0
     }
   },
   "monthly_global_usd_per_kg": {
